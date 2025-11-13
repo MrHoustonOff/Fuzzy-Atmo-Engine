@@ -16,7 +16,16 @@ import skfuzzy.control as ctrl
 
 from src.utils.logger import console
 from src.api_client.client import AirQualityClient
-from config import CURRENT_PARAMS
+# --- НОВОЕ: Импортируем настройки для графиков ---
+from config import CURRENT_PARAMS, CREATE_GRAPHICS, GRAPHICS_OUTPUT_DIR
+# --- НОВОЕ: Импортируем наш менеджер графиков ---
+try:
+    from src.utils.graphics_manager import GraphicsManager
+except ImportError:
+    GraphicsManager = None
+    if CREATE_GRAPHICS:
+        console.log("[bold red]Ошибка: Не удалось импортировать GraphicsManager. Убедитесь, что `matplotlib` и `pillow` установлены.[/]")
+
 
 # Импорты движков нечеткой логики
 from src.fuzzy_engine.particle_subsystem import create_particle_engine
@@ -28,6 +37,7 @@ from src.fuzzy_engine.forecast_system import create_forecast_engine
 
 
 def print_autograph():
+    """Выводит в консоль стилизованный ASCII-арт автограф."""
     autograph = r'''
                                     [blue]Made by:[/blue]
 <-. (`-')     (`-')  (`-').->                       (`-').->(`-')                <-. (`-')_ 
@@ -43,15 +53,7 @@ def print_autograph():
 
 
 def get_coordinates() -> tuple[float, float]:
-    """
-    Запрашивает у пользователя ввод географических координат.
-
-    Выполняет валидацию введенных данных, чтобы широта находилась
-    в диапазоне [-90, 90], а долгота - в [-180, 180].
-
-    Returns:
-        tuple[float, float]: Кортеж, содержащий широту и долготу.
-    """
+    """Запрашивает у пользователя ввод географических координат."""
     console.print(Panel.fit(
         "Для получения данных о качестве воздуха необходимы координаты.\n"
         "Вы можете определить их по ссылке: [bold link=https://www.latlong.net/]https://www.latlong.net/[/]",
@@ -82,19 +84,9 @@ def get_coordinates() -> tuple[float, float]:
     return latitude, longitude
 
 
-def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
+def run_fuzzy_logic(raw_data: dict, source_name: str = "API", manager: GraphicsManager | None = None):
     """
     Запускает полный цикл расчетов системы нечеткой логики.
-
-    Последовательно выполняет расчеты для всех подсистем (частицы, газы,
-    прочие), агрегирует их результаты в Мастер-системе для получения
-    текущего AQI, а затем запускает прогнозную систему на 24 часа.
-
-    Args:
-        raw_data (dict): Словарь с "сырыми" данными от API, содержащий
-                         ключи 'current' и 'hourly'.
-        source_name (str): Строка, описывающая источник данных
-                           (например, "API" или название mock-сценария).
     """
     console.log("[bold magenta]--- ЗАПУСК СИСТЕМЫ НЕЧЕТКОЙ ЛОГИКИ ---[/]")
     console.log(f"[grey50]Источник данных: {source_name}[/grey50]")
@@ -103,140 +95,123 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
     hourly_data = raw_data.get('hourly', {})
 
     if not current_data:
-        console.log("[bold red]Ошибка: отсутствуют данные 'current'. Расчет текущих показателей отменен.[/]")
+        console.log("[bold red]Ошибка: отсутствуют данные 'current'. Расчет отменен.[/]")
         return
 
-    # Инициализация переменных для хранения результатов
+    # --- ИСПРАВЛЕНИЕ: Инициализируем ВСЕ переменные здесь ---
     particle_risk_result = None
     gas_risk_result = None
     other_risk_result = None
     final_aqi_score = None
-    forecast_text = "Прогноз не выполнен (отсутствуют данные)"
-
+    rec_text = "N/A" # Значение по умолчанию
+    forecast_text = "Прогноз не выполнен (ошибка в предыдущих шагах)" # Значение по умолчанию
+    
     # --- 1. Подсистема "Частицы" ---
     console.log("\n[cyan]1. Расчет риска: Подсистема 'Частицы'[/]")
     try:
         particle_engine_ctrl = create_particle_engine()
+        antecedent_vars = {var.label: var for var in particle_engine_ctrl.antecedents}
+        consequent_var = {var.label: var for var in particle_engine_ctrl.consequents}['Particle_Risk']
         particle_simulation = ctrl.ControlSystemSimulation(particle_engine_ctrl)
         
-        # 📌 ИСПРАВЛЕНИЕ: Сохраняем в переменные для последующего вывода
-        input_pm2_5 = current_data.get('pm2_5', 0) or 0
-        input_pm10 = current_data.get('pm10', 0) or 0
-        input_aod = current_data.get('aerosol_optical_depth', 0) or 0
-        input_dust = current_data.get('dust', 0) or 0
-
-        # Установка входных значений
-        particle_simulation.input['pm2_5'] = input_pm2_5
-        particle_simulation.input['pm10'] = input_pm10
-        particle_simulation.input['aod'] = input_aod
-        particle_simulation.input['dust'] = input_dust
+        inputs_values = {'pm2_5': current_data.get('pm2_5', 0) or 0, 'pm10': current_data.get('pm10', 0) or 0, 'aod': current_data.get('aerosol_optical_depth', 0) or 0, 'dust': current_data.get('dust', 0) or 0}
+        for name, value in inputs_values.items():
+            particle_simulation.input[name] = value
+            if manager: manager.save_input_fuzzy_plot(antecedent_vars[name], value, f"Вход: {name.upper()} (Частицы)", f"01_input_particle_{name}.png")
 
         particle_simulation.compute()
         particle_risk_result = particle_simulation.output['Particle_Risk']
         
-        console.print(Panel(
-            # 📌 ИСПРАВЛЕНИЕ: Читаем из переменных
-            f"Входы: [ PM2.5: {input_pm2_5:.2f}, PM10: {input_pm10:.2f}, "
-            f"AOD: {input_aod:.2f}, Dust: {input_dust:.2f} ]\n"
-            f"Выходной риск (0-100): [bold yellow]{particle_risk_result:.2f}[/]",
-            title="[green]Подсистема 'Частицы': Результат[/green]"
-        ))
+        if manager and particle_risk_result is not None:
+            manager.save_output_fuzzy_plot(particle_simulation, consequent_var, "Выход: Риск от Частиц", "02_output_particle_risk.png")
+        
+        # --- ИСПРАВЛЕНИЕ: Возвращаем подробный вывод ---
+        inputs_str = ', '.join([f"{k.upper()}: {v:.2f}" for k, v in inputs_values.items()])
+        console.print(Panel(f"Входы: [ {inputs_str} ]\nВыходной риск (0-100): [bold yellow]{particle_risk_result:.2f}[/]", title="[green]Подсистема 'Частицы': Результат[/green]"))
     except Exception:
-        console.log("[bold red]Критическая ошибка в подсистеме 'Частицы':[/]")
-        console.print_exception()
+        console.log("[bold red]Критическая ошибка в подсистеме 'Частицы':[/]"); console.print_exception()
 
     # --- 2. Подсистема "Газы" ---
     console.log("\n[cyan]2. Расчет риска: Подсистема 'Газы'[/]")
     try:
         gas_engine_ctrl = create_gas_engine()
+        antecedent_vars = {var.label: var for var in gas_engine_ctrl.antecedents}
+        consequent_var = {var.label: var for var in gas_engine_ctrl.consequents}['Gas_Risk']
         gas_simulation = ctrl.ControlSystemSimulation(gas_engine_ctrl)
         
-        # 📌 ИСПРАВЛЕНИЕ: Сохраняем в переменные для последующего вывода
-        input_co = current_data.get('carbon_monoxide', 0) or 0
-        input_no2 = current_data.get('nitrogen_dioxide', 0) or 0
-        input_so2 = current_data.get('sulphur_dioxide', 0) or 0
-        
-        # Установка входных значений
-        gas_simulation.input['co'] = input_co
-        gas_simulation.input['no2'] = input_no2
-        gas_simulation.input['so2'] = input_so2
-        
+        inputs_values = {'co': current_data.get('carbon_monoxide', 0) or 0, 'no2': current_data.get('nitrogen_dioxide', 0) or 0, 'so2': current_data.get('sulphur_dioxide', 0) or 0}
+        for name, value in inputs_values.items():
+            gas_simulation.input[name] = value
+            if manager: manager.save_input_fuzzy_plot(antecedent_vars[name], value, f"Вход: {name.upper()} (Газы)", f"03_input_gas_{name}.png")
+
         gas_simulation.compute()
         gas_risk_result = gas_simulation.output['Gas_Risk']
         
-        console.print(Panel(
-            # 📌 ИСПРАВЛЕНИЕ: Читаем из переменных
-            f"Входы: [ CO: {input_co:.2f}, NO2: {input_no2:.2f}, SO2: {input_so2:.2f} ]\n"
-            f"Выходной риск (0-100): [bold yellow]{gas_risk_result:.2f}[/]",
-            title="[green]Подсистема 'Газы': Результат[/green]"
-        ))
+        if manager and gas_risk_result is not None:
+            manager.save_output_fuzzy_plot(gas_simulation, consequent_var, "Выход: Риск от Газов", "04_output_gas_risk.png")
+
+        inputs_str = ', '.join([f"{k.upper()}: {v:.2f}" for k, v in inputs_values.items()])
+        console.print(Panel(f"Входы: [ {inputs_str} ]\nВыходной риск (0-100): [bold yellow]{gas_risk_result:.2f}[/]", title="[green]Подсистема 'Газы': Результат[/green]"))
     except Exception:
-        console.log("[bold red]Критическая ошибка в подсистеме 'Газы':[/]")
-        console.print_exception()
+        console.log("[bold red]Критическая ошибка в подсистеме 'Газы':[/]"); console.print_exception()
 
     # --- 3. Подсистема "Прочие" ---
     console.log("\n[cyan]3. Расчет риска: Подсистема 'Прочие'[/]")
     try:
         other_engine_ctrl = create_other_engine()
+        antecedent_vars = {var.label: var for var in other_engine_ctrl.antecedents}
+        consequent_var = {var.label: var for var in other_engine_ctrl.consequents}['Other_Risk']
         other_simulation = ctrl.ControlSystemSimulation(other_engine_ctrl)
 
-        # 📌 ИСПРАВЛЕНИЕ: Сохраняем в переменные для последующего вывода
-        input_o3 = current_data.get('ozone', 0) or 0
-        input_nh3 = current_data.get('ammonia', 0) or 0
-        
-        # Установка входных значений
-        other_simulation.input['o3'] = input_o3
-        other_simulation.input['nh3'] = input_nh3
+        inputs_values = {'o3': current_data.get('ozone', 0) or 0, 'nh3': current_data.get('ammonia', 0) or 0}
+        for name, value in inputs_values.items():
+            other_simulation.input[name] = value
+            if manager: manager.save_input_fuzzy_plot(antecedent_vars[name], value, f"Вход: {name.upper()} (Прочие)", f"05_input_other_{name}.png")
 
         other_simulation.compute()
         other_risk_result = other_simulation.output['Other_Risk']
         
-        console.print(Panel(
-            # 📌 ИСПРАВЛЕНИЕ: Читаем из переменных
-            f"Входы: [ O3: {input_o3:.2f}, NH3: {input_nh3:.2f} ]\n"
-            f"Выходной риск (0-100): [bold yellow]{other_risk_result:.2f}[/]",
-            title="[green]Подсистема 'Прочие': Результат[/green]"
-        ))
+        if manager and other_risk_result is not None:
+            manager.save_output_fuzzy_plot(other_simulation, consequent_var, "Выход: Риск от Прочих", "06_output_other_risk.png")
+
+        inputs_str = ', '.join([f"{k.upper()}: {v:.2f}" for k, v in inputs_values.items()])
+        console.print(Panel(f"Входы: [ {inputs_str} ]\nВыходной риск (0-100): [bold yellow]{other_risk_result:.2f}[/]", title="[green]Подсистема 'Прочие': Результат[/green]"))
     except Exception:
-        console.log("[bold red]Критическая ошибка в подсистеме 'Прочие':[/]")
-        console.print_exception()
+        console.log("[bold red]Критическая ошибка в подсистеме 'Прочие':[/]"); console.print_exception()
+
 
     # --- 4. Мастер-система (агрегация результатов) ---
     console.log("\n[bold magenta]4. Агрегация: Мастер-система (Текущий AQI)[/]")
-    rec_text = "Ошибка при вычислении рекомендации"
-    
     if all(r is not None for r in [particle_risk_result, gas_risk_result, other_risk_result]):
         try:
             master_engine_ctrl = create_master_engine()
+            antecedent_vars = {var.label: var for var in master_engine_ctrl.antecedents}
+            consequent_vars = {var.label: var for var in master_engine_ctrl.consequents}
             master_simulation = ctrl.ControlSystemSimulation(master_engine_ctrl)
             
-            master_simulation.input['particle_risk_in'] = particle_risk_result
-            master_simulation.input['gas_risk_in'] = gas_risk_result
-            master_simulation.input['other_risk_in'] = other_risk_result
-            
-            master_simulation.compute()
+            inputs_values = {'particle_risk_in': particle_risk_result, 'gas_risk_in': gas_risk_result, 'other_risk_in': other_risk_result}
+            for name, value in inputs_values.items():
+                master_simulation.input[name] = value
+                if manager: manager.save_input_fuzzy_plot(antecedent_vars[name], value, f"Вход: {name} (Мастер)", f"07_input_master_{name}.png")
 
+            master_simulation.compute()
             final_aqi_score = master_simulation.output['Final_AQI']
             recommendation_index = master_simulation.output['Recommendation']
             
-            if recommendation_index <= 3:
-                rec_text = "[bold white on red]ОЧЕНЬ ВЫСОКИЙ РИСК[/]: Оставайтесь в помещении."
-            elif recommendation_index <= 6.5:
-                rec_text = "[bold yellow]ПОВЫШЕННЫЙ РИСК[/]: Ограничьте активность на улице."
-            elif recommendation_index <= 9:
-                rec_text = "[bold green]УМЕРЕННЫЙ РИСК[/]: Прогулки безопасны."
-            else:
-                rec_text = "[bold cyan]НИЗКИЙ РИСК[/]: Отличный день для прогулки!"
+            if manager:
+                manager.save_output_fuzzy_plot(master_simulation, consequent_vars['Final_AQI'], "Выход: Финальный AQI (Мастер)", "08_output_master_aqi.png")
+                manager.save_output_fuzzy_plot(master_simulation, consequent_vars['Recommendation'], "Выход: Рекомендация (Мастер)", "09_output_master_recommendation.png")
+            
+            if recommendation_index <= 3: rec_text = "[bold white on red]ОЧЕНЬ ВЫСОКИЙ РИСК[/]: Оставайтесь в помещении."
+            elif recommendation_index <= 6.5: rec_text = "[bold yellow]ПОВЫШЕННЫЙ РИСК[/]: Ограничьте активность на улице."
+            elif recommendation_index <= 9: rec_text = "[bold green]УМЕРЕННЫЙ РИСК[/]: Прогулки безопасны."
+            else: rec_text = "[bold cyan]НИЗКИЙ РИСК[/]: Отличный день для прогулки!"
 
-            console.print(Panel(
-                f"Входные риски: [ Частицы: {particle_risk_result:.2f}, Газы: {gas_risk_result:.2f}, Прочие: {other_risk_result:.2f} ]\n\n"
-                f"Итоговый AQI (0-500): [bold white on red] {final_aqi_score:.2f} [/]\n"
-                f"Рекомендация: {rec_text}",
-                title="[bold yellow]Мастер-система: Текущая оценка AQI[/]"
-            ))
+            inputs_str = ', '.join([f"{k}: {v:.2f}" for k, v in inputs_values.items()])
+            console.print(Panel(f"Входы: [ {inputs_str} ]\n\nИтоговый AQI (0-500): [bold white on red] {final_aqi_score:.2f} [/]\nРекомендация: {rec_text}", title="[bold yellow]Мастер-система: Текущая оценка AQI[/]"))
+
         except Exception:
-            console.log("[bold red]Критическая ошибка в Мастер-системе:[/]")
-            console.print_exception()
+            console.log("[bold red]Критическая ошибка в Мастер-системе:[/]"); console.print_exception()
     else:
         console.log("[bold red]Ошибка: Недостаточно данных от подсистем для запуска Мастер-системы.[/]")
 
@@ -251,10 +226,16 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
                 forecast_engine_ctrl = create_forecast_engine()
                 forecast_simulation = ctrl.ControlSystemSimulation(forecast_engine_ctrl)
                 
-                # Передача вычисленных статистик в движок
+                # 📌📌📌 ФИКС СИСТЕМЫ ПРОГНОЗА (TypeError: not iterable):
+                # Мы не можем проверять 'key in forecast_simulation.input'.
+                # Мы должны проверять 'key' в списке имен из "шаблона".
+                
+                # 1. Получаем список имен входов из "шаблона"
+                antecedent_labels = {var.label for var in forecast_engine_ctrl.antecedents}
+
+                # 2. Передаем вычисленные статистики в движок
                 for key, value in forecast_inputs.items():
-                    # 📌 ИСПРАВЛЕНИЕ: Используем .ctrl.input для проверки, поддерживает итерацию
-                    if key in forecast_simulation.ctrl.input:
+                    if key in antecedent_labels: # 3. Проверяем по списку
                         forecast_simulation.input[key] = value
 
                 forecast_simulation.compute()
@@ -284,22 +265,28 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
             console.log("[bold red]Критическая ошибка в Прогнозной системе:[/]")
             console.print_exception()
 
+
     # --- Итоговый отчет ---
     if final_aqi_score is None:
-        final_aqi_score = 0.0   # Установка значения по умолчанию для вывода
-        rec_text = "[red]не рассчитан[/]"
+        final_aqi_score, rec_text = 0.0, "[red]не рассчитан[/]"
 
-    console.print(Panel(
-        f"[b]Текущая оценка:[/b] {final_aqi_score:.2f} AQI | {rec_text}\n"
-        f"[b]Прогноз на 24ч:[/b]  {forecast_text}",
-        title="[bold yellow]Сводный отчет: Fuzzy Atmo-Engine[/]",
-        padding=(1,2)
-    ))
+    console.print(Panel(f"[b]Текущая оценка:[/b] {final_aqi_score:.2f} AQI | {rec_text}\n[b]Прогноз на 24ч:[/b]  {forecast_text}", title="[bold yellow]Сводный отчет: Fuzzy Atmo-Engine[/]", padding=(1,2)))
+    
+    if manager:
+        pdf_title = f"Отчет_{source_name.replace(':', '_').replace(' ', '').replace('(', '').replace(')', '').replace(',', '')}"
+        manager.generate_pdf_report(pdf_title)
+
     console.log("[bold grey50]... Расчеты системы нечеткой логики завершены ...[/]")
 
 
 def run_live_mode():
     """Запускает "живой" режим с получением данных из API по координатам."""
+    # --- НОВОЕ: Инициализация менеджера графиков ---
+    manager = None
+    if CREATE_GRAPHICS and GraphicsManager:
+        console.log(f"[bold yellow]Генерация графиков включена. Директория: {GRAPHICS_OUTPUT_DIR}[/]")
+        manager = GraphicsManager(GRAPHICS_OUTPUT_DIR)
+
     latitude, longitude = get_coordinates()
     console.log(f"Координаты приняты: ({latitude}, {longitude}). Запрос данных из API...")
     
@@ -340,14 +327,22 @@ def run_live_mode():
     else:
         console.log("[yellow]Внимание: почасовые данные для прогноза не получены.[/yellow]")
 
+
     if raw_data:
-        run_fuzzy_logic(raw_data, source_name=f"API: ({latitude}, {longitude})")
+        # --- НОВОЕ: Передаем менеджер в функцию ---
+        run_fuzzy_logic(raw_data, source_name=f"API_({latitude:.2f}, {longitude:.2f})", manager=manager)
     else:
         console.log("[bold red]Нет данных для запуска системы логики.[/]")
 
 
 def run_mock_mode():
     """Запускает тестовый режим с использованием данных из `mock_data.json`."""
+    # --- НОВОЕ: Инициализация менеджера графиков ---
+    manager = None
+    if CREATE_GRAPHICS and GraphicsManager:
+        console.log(f"[bold yellow]Генерация графиков включена. Директория: {GRAPHICS_OUTPUT_DIR}[/]")
+        manager = GraphicsManager(GRAPHICS_OUTPUT_DIR)
+        
     console.log("\n[bold yellow]Запуск в тестовом режиме (из mock_data.json)[/]")
     MOCK_FILE = "mock_data.json"
     
@@ -371,14 +366,14 @@ def run_mock_mode():
         if choice == 'q': return
             
         selected_key = scenario_keys[int(choice)-1]
-        console.log(f"Загрузка сценария: [bold yellow]{selected_key}[/]")
-        run_fuzzy_logic(mock_scenarios[selected_key], source_name=f"Mock: {selected_key}")
+        
+        # --- НОВОЕ: Передаем менеджер в функцию ---
+        run_fuzzy_logic(mock_scenarios[selected_key], source_name=f"Mock_{selected_key}", manager=manager)
 
     except FileNotFoundError:
         console.log(f"[bold red]Критическая Ошибка: Файл '{MOCK_FILE}' не найден![/]")
     except Exception:
-        console.log("[bold red]Критическая Ошибка в тестовом режиме:[/]")
-        console.print_exception()
+        console.log("[bold red]Критическая Ошибка в тестовом режиме:[/]"); console.print_exception()
 
 
 def main():
