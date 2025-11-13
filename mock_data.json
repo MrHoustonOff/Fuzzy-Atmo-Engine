@@ -1,0 +1,81 @@
+{
+  "norilsk_hell": {
+    "comment": "Тест 'Газовый Ад' (SO2), который API 'не видит'",
+    "current": {
+      "pm10": 10.0,
+      "pm2_5": 5.0,
+      "carbon_monoxide": 200.0,
+      "nitrogen_dioxide": 20.0,
+      "sulphur_dioxide": 1800.0,
+      "ozone": 30.0,
+      "aerosol_optical_depth": 0.1,
+      "dust": 5.0,
+      "ammonia": 0.0,
+      "european_aqi": 999,
+      "us_aqi": 999
+    },
+    "hourly": {}
+  },
+  "delhi_smog": {
+    "comment": "Тест 'Смог и Частицы' (PM2.5)",
+    "current": {
+      "pm10": 450.0,
+      "pm2_5": 250.0,
+      "carbon_monoxide": 2000.0,
+      "nitrogen_dioxide": 100.0,
+      "sulphur_dioxide": 50.0,
+      "ozone": 50.0,
+      "aerosol_optical_depth": 3.0,
+      "dust": 300.0,
+      "ammonia": 5.0,
+      "european_aqi": 999,
+      "us_aqi": 999
+    },
+    "hourly": {}
+  },
+  "la_photochemical": {
+    "comment": "Тест 'Фотохимия' (O3 - Озон)",
+    "current": {
+      "pm10": 50.0,
+      "pm2_5": 25.0,
+      "carbon_monoxide": 1000.0,
+      "nitrogen_dioxide": 150.0,
+      "sulphur_dioxide": 20.0,
+      "ozone": 240.0,
+      "aerosol_optical_depth": 0.5,
+      "dust": 20.0,
+      "ammonia": 2.0,
+      "european_aqi": 999,
+      "us_aqi": 999
+    },
+    "hourly": {}
+  },
+  "perfect_day": {
+    "comment": "Идеальный альпийский воздух",
+    "current": {
+      "pm10": 1.0, "pm2_5": 1.0, "carbon_monoxide": 100.0,
+      "nitrogen_dioxide": 1.0, "sulphur_dioxide": 1.0,
+      "ozone": 10.0, "aerosol_optical_depth": 0.0,
+      "dust": 0.0, "ammonia": 0.0,
+      "european_aqi": 1, "us_aqi": 1
+    },
+    "hourly": {}
+  }, 
+  "total_overload_1952": {
+    "comment": "Мини исторический экскурс: 'Великий СМОГ' (Лондон, 1952). Все 3 'реактора' в 'жопе'.",
+    "current": {
+      "pm10": 1000.0,
+      "pm2_5": 500.0,
+      "carbon_monoxide": 15000.0,
+      "nitrogen_dioxide": 600.0,
+      "sulphur_dioxide": 2000.0,
+      "ozone": 250.0,
+      "aerosol_optical_depth": 5.0,
+      "dust": 1000.0,
+      "ammonia": 200.0,
+      "european_aqi": 9999,
+      "us_aqi": 9999
+    },
+    "hourly": {}
+  }
+}
