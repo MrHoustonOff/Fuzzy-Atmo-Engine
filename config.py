@@ -1,14 +1,30 @@
 # Файл: config.py
+"""
+Конфигурационный файл проекта.
 
-# Базовый URL для Air Quality API
+Содержит глобальные константы, такие как базовый URL для API
+и списки параметров, запрашиваемых у сервера.
+"""
+
+# Базовый URL для API сервиса Open-Meteo Air Quality.
 API_BASE_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 
-# набор параметров
-# (Мы берем 9 + 2 AQI для сверки)
+# Список параметров для запроса текущих данных о качестве воздуха.
+# Включает основные загрязнители и два варианта индекса AQI для сверки.
 CURRENT_PARAMS = [
-    "pm10", "pm2_5", "carbon_monoxide", "nitrogen_dioxide",
-    "sulphur_dioxide", "ozone", "aerosol_optical_depth",
-    "dust", "ammonia", "european_aqi", "us_aqi"
+    "pm10",                   # Твердые частицы (диаметр < 10 мкм)
+    "pm2_5",                  # Мелкодисперсные частицы (диаметр < 2.5 мкм)
+    "carbon_monoxide",        # Угарный газ (CO)
+    "nitrogen_dioxide",       # Диоксид азота (NO2)
+    "sulphur_dioxide",        # Диоксид серы (SO2)
+    "ozone",                  # Приземный озон (O3)
+    "aerosol_optical_depth",  # Оптическая толщина аэрозолей (AOD)
+    "dust",                   # Пыль (общий показатель, часто пересекается с PM10)
+    "ammonia",                # Аммиак (NH3)
+    "european_aqi",           # Европейский индекс качества воздуха (EAQI)
+    "us_aqi",                 # Индекс качества воздуха США (US AQI)
 ]
 
-HOURLY_PARAMS = CURRENT_PARAMS  # тот же набор для прогноза часового
+# Список параметров для запроса прогнозируемых почасовых данных.
+# На данный момент используется тот же набор, что и для текущих данных.
+HOURLY_PARAMS = CURRENT_PARAMS
