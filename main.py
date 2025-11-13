@@ -1,4 +1,3 @@
-# Файл: main.py
 """
 Главный исполняемый файл приложения Fuzzy Atmo-Engine.
 
@@ -41,7 +40,6 @@ def print_autograph():
 `--'   `--'`--' '--'`--' `--'   `-----'  `-----'    `-----'    `--'      `-----' `--'  `--' 
     '''
     console.print(Panel.fit(autograph, style="bold"))
-
 
 
 def get_coordinates() -> tuple[float, float]:
@@ -121,18 +119,25 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
         particle_engine_ctrl = create_particle_engine()
         particle_simulation = ctrl.ControlSystemSimulation(particle_engine_ctrl)
         
-        # Установка входных значений с проверкой на None
-        particle_simulation.input['pm2_5'] = current_data.get('pm2_5', 0) or 0
-        particle_simulation.input['pm10'] = current_data.get('pm10', 0) or 0
-        particle_simulation.input['aod'] = current_data.get('aerosol_optical_depth', 0) or 0
-        particle_simulation.input['dust'] = current_data.get('dust', 0) or 0
+        # 📌 ИСПРАВЛЕНИЕ: Сохраняем в переменные для последующего вывода
+        input_pm2_5 = current_data.get('pm2_5', 0) or 0
+        input_pm10 = current_data.get('pm10', 0) or 0
+        input_aod = current_data.get('aerosol_optical_depth', 0) or 0
+        input_dust = current_data.get('dust', 0) or 0
+
+        # Установка входных значений
+        particle_simulation.input['pm2_5'] = input_pm2_5
+        particle_simulation.input['pm10'] = input_pm10
+        particle_simulation.input['aod'] = input_aod
+        particle_simulation.input['dust'] = input_dust
 
         particle_simulation.compute()
         particle_risk_result = particle_simulation.output['Particle_Risk']
         
         console.print(Panel(
-            f"Входы: [ PM2.5: {particle_simulation.input['pm2_5']:.2f}, PM10: {particle_simulation.input['pm10']:.2f}, "
-            f"AOD: {particle_simulation.input['aod']:.2f}, Dust: {particle_simulation.input['dust']:.2f} ]\n"
+            # 📌 ИСПРАВЛЕНИЕ: Читаем из переменных
+            f"Входы: [ PM2.5: {input_pm2_5:.2f}, PM10: {input_pm10:.2f}, "
+            f"AOD: {input_aod:.2f}, Dust: {input_dust:.2f} ]\n"
             f"Выходной риск (0-100): [bold yellow]{particle_risk_result:.2f}[/]",
             title="[green]Подсистема 'Частицы': Результат[/green]"
         ))
@@ -146,15 +151,22 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
         gas_engine_ctrl = create_gas_engine()
         gas_simulation = ctrl.ControlSystemSimulation(gas_engine_ctrl)
         
-        gas_simulation.input['co'] = current_data.get('carbon_monoxide', 0) or 0
-        gas_simulation.input['no2'] = current_data.get('nitrogen_dioxide', 0) or 0
-        gas_simulation.input['so2'] = current_data.get('sulphur_dioxide', 0) or 0
+        # 📌 ИСПРАВЛЕНИЕ: Сохраняем в переменные для последующего вывода
+        input_co = current_data.get('carbon_monoxide', 0) or 0
+        input_no2 = current_data.get('nitrogen_dioxide', 0) or 0
+        input_so2 = current_data.get('sulphur_dioxide', 0) or 0
+        
+        # Установка входных значений
+        gas_simulation.input['co'] = input_co
+        gas_simulation.input['no2'] = input_no2
+        gas_simulation.input['so2'] = input_so2
         
         gas_simulation.compute()
         gas_risk_result = gas_simulation.output['Gas_Risk']
         
         console.print(Panel(
-            f"Входы: [ CO: {gas_simulation.input['co']:.2f}, NO2: {gas_simulation.input['no2']:.2f}, SO2: {gas_simulation.input['so2']:.2f} ]\n"
+            # 📌 ИСПРАВЛЕНИЕ: Читаем из переменных
+            f"Входы: [ CO: {input_co:.2f}, NO2: {input_no2:.2f}, SO2: {input_so2:.2f} ]\n"
             f"Выходной риск (0-100): [bold yellow]{gas_risk_result:.2f}[/]",
             title="[green]Подсистема 'Газы': Результат[/green]"
         ))
@@ -167,15 +179,21 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
     try:
         other_engine_ctrl = create_other_engine()
         other_simulation = ctrl.ControlSystemSimulation(other_engine_ctrl)
+
+        # 📌 ИСПРАВЛЕНИЕ: Сохраняем в переменные для последующего вывода
+        input_o3 = current_data.get('ozone', 0) or 0
+        input_nh3 = current_data.get('ammonia', 0) or 0
         
-        other_simulation.input['o3'] = current_data.get('ozone', 0) or 0
-        other_simulation.input['nh3'] = current_data.get('ammonia', 0) or 0
+        # Установка входных значений
+        other_simulation.input['o3'] = input_o3
+        other_simulation.input['nh3'] = input_nh3
 
         other_simulation.compute()
         other_risk_result = other_simulation.output['Other_Risk']
         
         console.print(Panel(
-            f"Входы: [ O3: {other_simulation.input['o3']:.2f}, NH3: {other_simulation.input['nh3']:.2f} ]\n"
+            # 📌 ИСПРАВЛЕНИЕ: Читаем из переменных
+            f"Входы: [ O3: {input_o3:.2f}, NH3: {input_nh3:.2f} ]\n"
             f"Выходной риск (0-100): [bold yellow]{other_risk_result:.2f}[/]",
             title="[green]Подсистема 'Прочие': Результат[/green]"
         ))
@@ -235,7 +253,8 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
                 
                 # Передача вычисленных статистик в движок
                 for key, value in forecast_inputs.items():
-                    if key in forecast_simulation.input:
+                    # 📌 ИСПРАВЛЕНИЕ: Используем .ctrl.input для проверки, поддерживает итерацию
+                    if key in forecast_simulation.ctrl.input:
                         forecast_simulation.input[key] = value
 
                 forecast_simulation.compute()
@@ -245,7 +264,7 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
                 if forecast_risk_score > 30: 
                     peak_hour = forecast_inputs.get('pm_peak_hour', -1)
                     if 5 <= peak_hour < 12:   peak_time_text = "[bold](Пик загрязнения ожидается утром)[/]"
-                    elif 12 <= peak_hour < 18:  peak_time_text = "[bold](Пик загрязнения ожидается днем)[/]"
+                    elif 12 <= peak_hour < 18:   peak_time_text = "[bold](Пик загрязнения ожидается днем)[/]"
                     elif 18 <= peak_hour <= 23: peak_time_text = "[bold](Пик загрязнения ожидается вечером)[/]"
                     elif 0 <= peak_hour < 5:    peak_time_text = "[bold](Пик загрязнения ожидается ночью)[/]"
 
@@ -267,7 +286,7 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
 
     # --- Итоговый отчет ---
     if final_aqi_score is None:
-        final_aqi_score = 0.0  # Установка значения по умолчанию для вывода
+        final_aqi_score = 0.0   # Установка значения по умолчанию для вывода
         rec_text = "[red]не рассчитан[/]"
 
     console.print(Panel(
@@ -342,10 +361,10 @@ def run_mock_mode():
         choices = []
         for i, key in enumerate(scenario_keys):
             comment = mock_scenarios[key].get('comment', 'Нет описания')
-            prompt_text += f"  [{i+1}] {key} ([grey50]{comment}[/grey50])\n"
+            prompt_text += f"   [{i+1}] {key} ([grey50]{comment}[/grey50])\n"
             choices.append(str(i+1))
         
-        prompt_text += "\n  [q] Назад в Главное Меню\n\n  Выберите сценарий:"
+        prompt_text += "\n   [q] Назад в Главное Меню\n\n   Выберите сценарий:"
         choices.append("q")
         choice = Prompt.ask(prompt_text, choices=choices, default="1")
         
@@ -373,10 +392,10 @@ def main():
             padding=(1, 2)
         ))
         mode = Prompt.ask(
-            "  [1] 'Живой' режим (данные из API по координатам)\n"
-            "  [2] 'Тестовый' режим (данные из файла)\n"
-            "  [q] Выход\n"
-            "\n  Ваш выбор:",
+            "   [1] 'Живой' режим (данные из API по координатам)\n"
+            "   [2] 'Тестовый' режим (данные из файла)\n"
+            "   [q] Выход\n"
+            "\n   Ваш выбор:",
             choices=["1", "2", "q"], default="1"
         )
         
