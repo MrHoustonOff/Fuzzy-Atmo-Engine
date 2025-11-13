@@ -74,7 +74,6 @@ def preprocess_hourly_data(
             # Если данных по PM2.5 нет, заполняем нулями
             processed_inputs.update({'pm_avg': 0, 'pm_max': 0, 'pm_hours_bad': 0, 'pm_peak_hour': -1})
 
-
         # --- 3. Расчет нормализованного риска от газов ---
         # Концентрации нормализуются относительно их "опасных" порогов,
         # чтобы привести их к единой шкале. Берется максимальное значение.
@@ -89,7 +88,7 @@ def preprocess_hourly_data(
         else:
             processed_inputs['o3_max'] = 0
 
-    except Exception as e:
+    except Exception:
         console.log(f"[bold red]Критическая ошибка в препроцессоре прогноза:[/]")
         console.print_exception()
         return {}

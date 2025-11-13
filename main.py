@@ -1,6 +1,14 @@
+# Файл: main.py
+"""
+Главный исполняемый файл приложения Fuzzy Atmo-Engine.
+
+Отвечает за основной цикл работы, взаимодействие с пользователем через
+консольное меню, запуск выбранного режима (получение данных из API
+или использование тестовых сценариев) и вызов системы нечеткой логики
+для анализа полученных данных.
+"""
 import time
-import json  # (Оставляем для 'mock_data.json')
-import random # (Оставляем для "будущих" "стульев")
+import json
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.pretty import Pretty
@@ -9,16 +17,15 @@ import skfuzzy.control as ctrl
 
 from src.utils.logger import console
 from src.api_client.client import AirQualityClient
-from config import CURRENT_PARAMS, HOURLY_PARAMS
+from config import CURRENT_PARAMS
 
-# "Чистые" импорты "матана"
+# Импорты движков нечеткой логики
 from src.fuzzy_engine.particle_subsystem import create_particle_engine
 from src.fuzzy_engine.gas_subsystem import create_gas_engine
 from src.fuzzy_engine.other_subsystem import create_other_engine
 from src.fuzzy_engine.master_system import create_master_engine
 from src.fuzzy_engine.forecast_preprocessor import preprocess_hourly_data
 from src.fuzzy_engine.forecast_system import create_forecast_engine
-
 
 
 def print_autograph():
@@ -36,156 +43,151 @@ def print_autograph():
     console.print(Panel.fit(autograph, style="bold"))
 
 
-def get_coordinates() -> (float, float):
+
+def get_coordinates() -> tuple[float, float]:
+    """
+    Запрашивает у пользователя ввод географических координат.
+
+    Выполняет валидацию введенных данных, чтобы широта находилась
+    в диапазоне [-90, 90], а долгота - в [-180, 180].
+
+    Returns:
+        tuple[float, float]: Кортеж, содержащий широту и долготу.
+    """
     console.print(Panel.fit(
-        "Нам нужны координаты. \nТыкни в карту и получи их тут: [bold link=https://www.latlong.net/]https://www.latlong.net/[/]",
+        "Для получения данных о качестве воздуха необходимы координаты.\n"
+        "Вы можете определить их по ссылке: [bold link=https://www.latlong.net/]https://www.latlong.net/[/]",
         title="[yellow]Ввод данных[/yellow]",
         padding=(1, 2)
     ))
 
     while True:
         try:
-            lat_str = Prompt.ask("   [cyan]Введите Широту (Latitude)[/cyan]")
+            lat_str = Prompt.ask("   [cyan]Введите широту (Latitude)[/cyan]")
             latitude = float(lat_str)
             if not -90 <= latitude <= 90:
-                raise ValueError("Широта должна быть в диапазоне [-90, 90].")
+                raise ValueError("Широта должна быть в диапазоне от -90 до 90.")
             break
         except ValueError as e:
-            console.print(f"[bold red]Ошибка![/] {e}. Попробуйте еще раз.")
+            console.print(f"[bold red]Ошибка ввода![/] {e} Попробуйте еще раз.")
 
     while True:
         try:
-            lon_str = Prompt.ask("   [cyan]Введите Долготу (Longitude)[/cyan]")
+            lon_str = Prompt.ask("   [cyan]Введите долготу (Longitude)[/cyan]")
             longitude = float(lon_str)
             if not -180 <= longitude <= 180:
-                raise ValueError("Долгота должна быть в диапазоне [-180, 180].")
+                raise ValueError("Долгота должна быть в диапазоне от -180 до 180.")
             break
         except ValueError as e:
-            console.print(f"[bold red]Ошибка![/] {e}. Попробуйте еще раз.")
+            console.print(f"[bold red]Ошибка ввода![/] {e} Попробуйте еще раз.")
 
     return latitude, longitude
 
 
-# Файл: main.py
-# (ВСТАВИТЬ ВМЕСТО ВСЕЙ ФУНКЦИИ run_fuzzy_logic)
-# (ВЕРСИЯ 4.1 - "Патч" 7.1. "Чинит" 'MarkupError [//]')
-
 def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
     """
-    (ФИНАЛЬНАЯ "ДОЛИЗАННАЯ" ВЕРСИЯ v4.2)
-    Запускает ВЕСЬ "матан" (Система А + Система Б).
-    "Возвращает" "секси" 'Panel' для *каждого* "движка".
+    Запускает полный цикл расчетов системы нечеткой логики.
+
+    Последовательно выполняет расчеты для всех подсистем (частицы, газы,
+    прочие), агрегирует их результаты в Мастер-системе для получения
+    текущего AQI, а затем запускает прогнозную систему на 24 часа.
+
+    Args:
+        raw_data (dict): Словарь с "сырыми" данными от API, содержащий
+                         ключи 'current' и 'hourly'.
+        source_name (str): Строка, описывающая источник данных
+                           (например, "API" или название mock-сценария).
     """
-    console.log("[bold magenta]--- ЗАПУСК 'МАТАНА' (Fuzzy Engine) ---[/]")
+    console.log("[bold magenta]--- ЗАПУСК СИСТЕМЫ НЕЧЕТКОЙ ЛОГИКИ ---[/]")
     console.log(f"[grey50]Источник данных: {source_name}[/grey50]")
-    
+
     current_data = raw_data.get('current', {})
     hourly_data = raw_data.get('hourly', {})
-    
+
     if not current_data:
-        console.log("[bold red]Ошибка: 'current' данные отсутствуют. 'Мгновенный' матан отменен.[/]")
+        console.log("[bold red]Ошибка: отсутствуют данные 'current'. Расчет текущих показателей отменен.[/]")
         return
-        
-    # "Контейнеры" (Чинит 'UnboundLocalError')
+
+    # Инициализация переменных для хранения результатов
     particle_risk_result = None
     gas_risk_result = None
     other_risk_result = None
     final_aqi_score = None
-    final_recommendation_index = None
-    forecast_text = "N/A (Прогноз не запущен)"
+    forecast_text = "Прогноз не выполнен (отсутствуют данные)"
 
-    # --- 1. ПОД-СИСТЕМА "ЧАСТИЦЫ" (Мгновенный) ---
-    console.log("[cyan]... Инициализация Под-системы 'Частицы' ...[/]")
+    # --- 1. Подсистема "Частицы" ---
+    console.log("\n[cyan]1. Расчет риска: Подсистема 'Частицы'[/]")
     try:
         particle_engine_ctrl = create_particle_engine()
         particle_simulation = ctrl.ControlSystemSimulation(particle_engine_ctrl)
         
-        input_pm2_5 = current_data.get('pm2_5', 0) or 0
-        input_pm10 = current_data.get('pm10', 0) or 0
-        input_aod = current_data.get('aerosol_optical_depth', 0) or 0
-        input_dust = current_data.get('dust', 0) or 0
-        
-        particle_simulation.input['pm2_5'] = input_pm2_5
-        particle_simulation.input['pm10'] = input_pm10
-        particle_simulation.input['aod'] = input_aod
-        particle_simulation.input['dust'] = input_dust
+        # Установка входных значений с проверкой на None
+        particle_simulation.input['pm2_5'] = current_data.get('pm2_5', 0) or 0
+        particle_simulation.input['pm10'] = current_data.get('pm10', 0) or 0
+        particle_simulation.input['aod'] = current_data.get('aerosol_optical_depth', 0) or 0
+        particle_simulation.input['dust'] = current_data.get('dust', 0) or 0
 
         particle_simulation.compute()
         particle_risk_result = particle_simulation.output['Particle_Risk']
         
-        console.log("[bold green]ПОД-СИСТЕМА 'ЧАСТИЦЫ' ОТРАБОТАЛА:[/]")
         console.print(Panel(
-            f"Входы: [ PM2.5: {input_pm2_5}, PM10: {input_pm10}, AOD: {input_aod}, Dust: {input_dust} ]\n"
-            f"Выход (0-100): [bold yellow]Particle_Risk = {particle_risk_result:.2f}[/bold yellow]",
-            title="[green]Результат 1 (Дефаззификация)[/green]"
+            f"Входы: [ PM2.5: {particle_simulation.input['pm2_5']:.2f}, PM10: {particle_simulation.input['pm10']:.2f}, "
+            f"AOD: {particle_simulation.input['aod']:.2f}, Dust: {particle_simulation.input['dust']:.2f} ]\n"
+            f"Выходной риск (0-100): [bold yellow]{particle_risk_result:.2f}[/]",
+            title="[green]Подсистема 'Частицы': Результат[/green]"
         ))
-    except Exception as e:
-        console.log("[bold red]КРИТИЧЕСКАЯ ОШИБКА ('Частицы'):[/]")
+    except Exception:
+        console.log("[bold red]Критическая ошибка в подсистеме 'Частицы':[/]")
         console.print_exception()
 
-    # --- 2. ПОД-СИСТЕМА "ГАЗЫ" (Мгновенный) ---
-    console.log("[cyan]... Инициализация Под-системы 'Газы' ...[/]")
+    # --- 2. Подсистема "Газы" ---
+    console.log("\n[cyan]2. Расчет риска: Подсистема 'Газы'[/]")
     try:
         gas_engine_ctrl = create_gas_engine()
         gas_simulation = ctrl.ControlSystemSimulation(gas_engine_ctrl)
         
-        input_co = current_data.get('carbon_monoxide', 0) or 0
-        input_no2 = current_data.get('nitrogen_dioxide', 0) or 0
-        input_so2 = current_data.get('sulphur_dioxide', 0) or 0
-        
-        gas_simulation.input['co'] = input_co
-        gas_simulation.input['no2'] = input_no2
-        gas_simulation.input['so2'] = input_so2
+        gas_simulation.input['co'] = current_data.get('carbon_monoxide', 0) or 0
+        gas_simulation.input['no2'] = current_data.get('nitrogen_dioxide', 0) or 0
+        gas_simulation.input['so2'] = current_data.get('sulphur_dioxide', 0) or 0
         
         gas_simulation.compute()
         gas_risk_result = gas_simulation.output['Gas_Risk']
         
-        console.log("[bold green]ПОД-СИСТЕМА 'ГАЗЫ' ОТРАБОТАЛА:[/]")
         console.print(Panel(
-            f"Входы: [ CO: {input_co}, NO2: {input_no2}, SO2: {input_so2} ]\n"
-            f"Выход (0-100): [bold yellow]Gas_Risk = {gas_risk_result:.2f}[/bold yellow]",
-            title="[green]Результат 2 (Дефаззификация)[/green]"
+            f"Входы: [ CO: {gas_simulation.input['co']:.2f}, NO2: {gas_simulation.input['no2']:.2f}, SO2: {gas_simulation.input['so2']:.2f} ]\n"
+            f"Выходной риск (0-100): [bold yellow]{gas_risk_result:.2f}[/]",
+            title="[green]Подсистема 'Газы': Результат[/green]"
         ))
-    except Exception as e:
-        console.log("[bold red]КРИТИЧЕСКАЯ ОШИБКА ('Газы'):[/]")
+    except Exception:
+        console.log("[bold red]Критическая ошибка в подсистеме 'Газы':[/]")
         console.print_exception()
 
-    # --- 3. ПОД-СИСТЕМА "ПРОЧИЕ" (Мгновенный) ---
-    console.log("[cyan]... Инициализация Под-системы 'Прочие' ...[/]")
+    # --- 3. Подсистема "Прочие" ---
+    console.log("\n[cyan]3. Расчет риска: Подсистема 'Прочие'[/]")
     try:
         other_engine_ctrl = create_other_engine()
         other_simulation = ctrl.ControlSystemSimulation(other_engine_ctrl)
         
-        input_o3 = current_data.get('ozone', 0) or 0
-        input_nh3 = current_data.get('ammonia', 0) or 0
-        
-        other_simulation.input['o3'] = input_o3
-        other_simulation.input['nh3'] = input_nh3
+        other_simulation.input['o3'] = current_data.get('ozone', 0) or 0
+        other_simulation.input['nh3'] = current_data.get('ammonia', 0) or 0
 
         other_simulation.compute()
         other_risk_result = other_simulation.output['Other_Risk']
         
-        console.log("[bold green]ПОД-СИСТЕМА 'ПРОЧИЕ' ОТРАБОТАЛА:[/]")
         console.print(Panel(
-            f"Входы: [ O3: {input_o3}, NH3: {input_nh3} ]\n"
-            f"Выход (0-100): [bold yellow]Other_Risk = {other_risk_result:.2f}[/bold yellow]",
-            title="[green]Результат 3 (Дефаззификация)[/green]"
+            f"Входы: [ O3: {other_simulation.input['o3']:.2f}, NH3: {other_simulation.input['nh3']:.2f} ]\n"
+            f"Выходной риск (0-100): [bold yellow]{other_risk_result:.2f}[/]",
+            title="[green]Подсистема 'Прочие': Результат[/green]"
         ))
-    except Exception as e:
-        console.log("[bold red]КРИТИЧЕСКАЯ ОШИБКА ('Прочие'):[/]")
+    except Exception:
+        console.log("[bold red]Критическая ошибка в подсистеме 'Прочие':[/]")
         console.print_exception()
 
-
-    # --- 4. "МАСТЕР-СИСТЕМА" (Мгновенный) ---
-    console.log("[bold magenta]... Инициализация ГЛАВНОЙ (Мастер) Системы ...[/]")
+    # --- 4. Мастер-система (агрегация результатов) ---
+    console.log("\n[bold magenta]4. Агрегация: Мастер-система (Текущий AQI)[/]")
+    rec_text = "Ошибка при вычислении рекомендации"
     
-    # "Секси" текст для "Мгновенного" AQI (Инициализируем ДО "try/except")
-    rec_text = "N/A (Ошибка 'Мастера')"
-    
-    if (particle_risk_result is not None and 
-        gas_risk_result is not None and 
-        other_risk_result is not None):
-        
+    if all(r is not None for r in [particle_risk_result, gas_risk_result, other_risk_result]):
         try:
             master_engine_ctrl = create_master_engine()
             master_simulation = ctrl.ControlSystemSimulation(master_engine_ctrl)
@@ -197,55 +199,44 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
             master_simulation.compute()
 
             final_aqi_score = master_simulation.output['Final_AQI']
-            final_recommendation_index = master_simulation.output['Recommendation']
+            recommendation_index = master_simulation.output['Recommendation']
             
-            # --- "ВОЗВРАЩАЕМ" "ТВОЙ" 'Panel' (Из "старого" кода v3.1.1) ---
-            if final_recommendation_index <= 3: # stay_home
-                rec_text = "[bold white on red]ОСТАВАЙТЕСЬ ДОМА[/]: Экстремально опасно."
-            elif final_recommendation_index <= 6.5: # limit_activity
-                rec_text = "[bold yellow]ОГРАНИЧЬТЕ АКТИВНОСТЬ[/]: Нездорово."
-            elif final_recommendation_index <= 9: # go_out_safe
-                rec_text = "[bold green]ПРОГУЛКИ БЕЗОПАСНЫ[/]: Качество приемлемое."
-            else: # perfect_day
-                rec_text = "[bold cyan]ИДЕАЛЬНЫЙ ДЕНЬ[/]: Воздух чистый."
+            if recommendation_index <= 3:
+                rec_text = "[bold white on red]ОЧЕНЬ ВЫСОКИЙ РИСК[/]: Оставайтесь в помещении."
+            elif recommendation_index <= 6.5:
+                rec_text = "[bold yellow]ПОВЫШЕННЫЙ РИСК[/]: Ограничьте активность на улице."
+            elif recommendation_index <= 9:
+                rec_text = "[bold green]УМЕРЕННЫЙ РИСК[/]: Прогулки безопасны."
+            else:
+                rec_text = "[bold cyan]НИЗКИЙ РИСК[/]: Отличный день для прогулки!"
 
-            console.log("[bold yellow]=== ФИНАЛЬНЫЙ ВЕРДИКТ СИСТЕМЫ (A) ===[/]")
             console.print(Panel(
-                f"Входы: [ P_Risk: {particle_risk_result:.2f}, G_Risk: {gas_risk_result:.2f}, O_Risk: {other_risk_result:.2f} ]\n\n"
-                f"Финальный AQI (0-500): [bold white on red] {final_aqi_score:.2f} [/]\n"
+                f"Входные риски: [ Частицы: {particle_risk_result:.2f}, Газы: {gas_risk_result:.2f}, Прочие: {other_risk_result:.2f} ]\n\n"
+                f"Итоговый AQI (0-500): [bold white on red] {final_aqi_score:.2f} [/]\n"
                 f"Рекомендация: {rec_text}",
-                title="[yellow bold]Мастер-Система (Дефаззификация)[/]"
+                title="[bold yellow]Мастер-система: Текущая оценка AQI[/]"
             ))
-            # --- "ПАТЧ" (Возвращение "старого" 'Panel') ОКОНЧЕН ---
-
-        except Exception as e:
-            console.log("[bold red]КРИТИЧЕСКАЯ ОШИБКА ('Мастер-Система'):[/]")
+        except Exception:
+            console.log("[bold red]Критическая ошибка в Мастер-системе:[/]")
             console.print_exception()
-    
     else:
-        console.log("[bold red]Ошибка: Недостаточно данных от под-систем для запуска 'Мастер-Системы'[/]")
+        console.log("[bold red]Ошибка: Недостаточно данных от подсистем для запуска Мастер-системы.[/]")
 
-    
-    # --- 5. "ПРОГНОЗНЫЙ ДВИЖОК" (Система Б) ---
-    console.log("[bold blue]--- ЗАПУСК 'СИСТЕМЫ Б' (Прогноз 24ч) ---[/]")
-    
+    # --- 5. Прогнозная система ---
+    console.log("\n[bold blue]--- ЗАПУСК ПРОГНОЗНОЙ СИСТЕМЫ (24 ЧАСА) ---[/]")
     if not hourly_data or 'pm2_5' not in hourly_data or not hourly_data['pm2_5']:
-        console.log("[bold red]Ошибка: 'hourly' данные отсутствуют. 'Прогнозный' матан отменен.[/]")
-        forecast_text = "N/A (Нет 'hourly' данных)"
-    
+        console.log("[yellow]Предупреждение: Отсутствуют почасовые данные. Расчет прогноза отменен.[/yellow]")
     else:
         try:
             forecast_inputs = preprocess_hourly_data(hourly_data, hours_to_forecast=24)
-            
             if forecast_inputs:
                 forecast_engine_ctrl = create_forecast_engine()
                 forecast_simulation = ctrl.ControlSystemSimulation(forecast_engine_ctrl)
                 
-                forecast_simulation.input['pm_avg'] = forecast_inputs.get('pm_avg', 0)
-                forecast_simulation.input['pm_max'] = forecast_inputs.get('pm_max', 0)
-                forecast_simulation.input['pm_hours_bad'] = forecast_inputs.get('pm_hours_bad', 0)
-                forecast_simulation.input['gas_norm_risk'] = forecast_inputs.get('gas_norm_risk', 0)
-                forecast_simulation.input['o3_max'] = forecast_inputs.get('o3_max', 0)
+                # Передача вычисленных статистик в движок
+                for key, value in forecast_inputs.items():
+                    if key in forecast_simulation.input:
+                        forecast_simulation.input[key] = value
 
                 forecast_simulation.compute()
                 forecast_risk_score = forecast_simulation.output['Forecast_Risk']
@@ -253,163 +244,126 @@ def run_fuzzy_logic(raw_data: dict, source_name: str = "API"):
                 peak_time_text = ""
                 if forecast_risk_score > 30: 
                     peak_hour = forecast_inputs.get('pm_peak_hour', -1)
-                    if 5 <= peak_hour < 12:
-                        peak_time_text = "[bold](Пик PM2.5 ожидается УТРОМ)[/bold]"
-                    elif 12 <= peak_hour < 18:
-                        peak_time_text = "[bold](Пик PM2.5 ожидается ДНЕМ)[/bold]"
-                    elif 18 <= peak_hour <= 23:
-                        peak_time_text = "[bold](Пик PM2.5 ожидается ВЕЧЕРОМ)[/bold]"
-                    elif 0 <= peak_hour < 5:
-                        peak_time_text = "[bold](Пик PM2.5 ожидается НОЧЬЮ)[/bold]"
+                    if 5 <= peak_hour < 12:   peak_time_text = "[bold](Пик загрязнения ожидается утром)[/]"
+                    elif 12 <= peak_hour < 18:  peak_time_text = "[bold](Пик загрязнения ожидается днем)[/]"
+                    elif 18 <= peak_hour <= 23: peak_time_text = "[bold](Пик загрязнения ожидается вечером)[/]"
+                    elif 0 <= peak_hour < 5:    peak_time_text = "[bold](Пик загрязнения ожидается ночью)[/]"
 
-                if forecast_risk_score <= 30: # low
+                if forecast_risk_score <= 30:
                     forecast_text = f"[bold green]НИЗКИЙ РИСК[/]: Прогноз на 24ч стабильный."
-                elif forecast_risk_score <= 65: # medium
-                    forecast_text = f"[bold yellow]СРЕДНИЙ РИСК[/]: Будьте осторожны. {peak_time_text}"
-                else: # high / critical
-                    forecast_text = f"[bold red]ВЫСОКИЙ РИСК[/]: 'Грязный' день. {peak_time_text}"
+                elif forecast_risk_score <= 65:
+                    forecast_text = f"[bold yellow]СРЕДНИЙ РИСК[/]: Рекомендуется осторожность. {peak_time_text}"
+                else:
+                    forecast_text = f"[bold red]ВЫСОКИЙ РИСК[/]: Возможен неблагоприятный день. {peak_time_text}"
 
-                # --- "ВОЗВРАЩАЕМ" "СЕКСИ" 'Panel' ДЛЯ "СИСТЕМЫ Б" ---
-                console.log("[bold blue]ПРОГНОЗНЫЙ ДВИЖОК ОТРАБОТАЛ:[/]")
                 console.print(Panel(
-                    f"Входы (статистика 24ч): [ PM_Avg: {forecast_inputs.get('pm_avg'):.2f}, PM_Max: {forecast_inputs.get('pm_max'):.2f}, PM_Hours_Bad: {forecast_inputs.get('pm_hours_bad')} ]\n"
-                    f"Входы (статистика 24ч): [ Gas_Norm_Risk: {forecast_inputs.get('gas_norm_risk'):.2f}, O3_Max: {forecast_inputs.get('o3_max'):.2f} ]\n\n"
-                    f"Выход (0-100): [bold yellow]Forecast_Risk = {forecast_risk_score:.2f}[/bold yellow]\n"
-                    f"Вердикт на 24ч: {forecast_text}",
-                    title="[blue]Результат 'Системы Б' (Прогноз v2.0)[/]"
+                    f"Выходной риск (0-100): [bold yellow]{forecast_risk_score:.2f}[/]\n"
+                    f"Прогноз на 24 часа: {forecast_text}",
+                    title="[bold blue]Прогнозная система: Результат на 24 часа[/]"
                 ))
-
-        except Exception as e:
-            console.log("[bold red]КРИТИЧЕСКАЯ ОШИБКА ('Прогнозный Движок'):[/]")
+        except Exception:
+            console.log("[bold red]Критическая ошибка в Прогнозной системе:[/]")
             console.print_exception()
 
+    # --- Итоговый отчет ---
+    if final_aqi_score is None:
+        final_aqi_score = 0.0  # Установка значения по умолчанию для вывода
+        rec_text = "[red]не рассчитан[/]"
 
-    # --- "ХОТФИКС" (v4.2): "Чиним" "контейнеры" для "Сводки" ---
-    if final_aqi_score is None or final_recommendation_index is None:
-        rec_text = "[bold red]ОШИБКА 'Мастера'[/]"
-        final_aqi_score = 0.0
-    
-    # --- ФИНАЛЬНЫЙ ВЫВОД (Сводка) ---
-    console.log("[bold yellow]=== ФИНАЛЬНЫЙ ВЕРДИКТ (Сводка) ===[/]")
     console.print(Panel(
-        f"СЕЙЧАС (Система А):  [bold]{final_aqi_score:.2f}[/] AQI | {rec_text}\n"
-        f"ПРОГНОЗ (Система Б): {forecast_text}",
-        title="[yellow bold]Fuzzy Atmosphere Engine (Вердикт)[/]"
+        f"[b]Текущая оценка:[/b] {final_aqi_score:.2f} AQI | {rec_text}\n"
+        f"[b]Прогноз на 24ч:[/b]  {forecast_text}",
+        title="[bold yellow]Сводный отчет: Fuzzy Atmo-Engine[/]",
+        padding=(1,2)
     ))
+    console.log("[bold grey50]... Расчеты системы нечеткой логики завершены ...[/]")
 
-    # --- "СЖИГАЕМ" JUPYTER ---
-    console.log("[bold grey50]... 'Матан' завершен ...[/]")
-    # -------------------------
-    
+
 def run_live_mode():
-    """
-    (Этап 1.2) Запускаем "боевой" режим парсинга.
-    """
+    """Запускает "живой" режим с получением данных из API по координатам."""
     latitude, longitude = get_coordinates()
-    console.log(f"Координаты приняты: ({latitude}, {longitude}). Запускаем парсер...")
+    console.log(f"Координаты приняты: ({latitude}, {longitude}). Запрос данных из API...")
     
     client = AirQualityClient()
     raw_data = None
 
     with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        console=console,
-        transient=True 
+        SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
+        BarColumn(), TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console, transient=True 
     ) as progress:
-        
-        task_current = progress.add_task("[cyan]Парсинг 'Current' (9+2)...[/cyan]", total=100)
-        task_hourly = progress.add_task("[blue]Парсинг 'Hourly' (Массивы)...[/blue]", total=100)
-
+        task_current = progress.add_task("[cyan]Запрос текущих данных...[/]", total=100)
+        task_hourly = progress.add_task("[blue]Запрос прогноза...[/]", total=100)
         time.sleep(0.5)
         
         try:
             raw_data = client.get_air_quality(latitude, longitude)
-            
-            progress.update(task_current, completed=100, description="[green]Парсинг 'Current' (9+2) [bold]OK[/bold][/green]")
+            progress.update(task_current, completed=100, description="[green]Текущие данные получены [bold]OK[/]")
             time.sleep(0.3)
-            progress.update(task_hourly, completed=100, description="[green]Парсинг 'Hourly' (Массивы) [bold]OK[/bold][/green]")
+            progress.update(task_hourly, completed=100, description="[green]Данные прогноза получены [bold]OK[/]")
             time.sleep(0.5)
-
-        except Exception as e:
+        except Exception:
             progress.stop()
             console.log(f"[bold red]КРИТИЧЕСКАЯ ОШИБКА API:[/]")
             console.print_exception()
             return
 
-    console.log("[bold green]Парсинг прошел успешно![/]")
-    
-    current_data_clean = raw_data.get('current', {})
+    console.log("[bold green]Данные из API успешно получены![/]")
+    current_data = raw_data.get('current', {})
     filtered_current = {
-        key: current_data_clean.get(key) for key in CURRENT_PARAMS 
-        if key in current_data_clean
+        key: current_data.get(key) for key in CURRENT_PARAMS if key in current_data
     }
-    console.print(Pretty(filtered_current))
+    console.print(Panel(Pretty(filtered_current), title="[bold]Текущие показатели[/]"))
     
-    hourly_data = raw_data.get('hourly', {})
-    if 'time' in hourly_data and hourly_data.get('pm2_5'):
-        timestamps_count = len(hourly_data['time'])
-        console.log(f"[bold]Парсинг 'Hourly' массивов получен.[/] [grey50]({timestamps_count} таймстэмпов)[/grey50]")
+    if 'time' in raw_data.get('hourly', {}):
+        count = len(raw_data['hourly']['time'])
+        console.log(f"[bold]Получены почасовые данные для прогноза.[/] [grey50]({count} записей)[/grey50]")
     else:
-        console.log("[yellow]Внимание: 'Hourly' данные не получены (пустой ответ).[/yellow]")
+        console.log("[yellow]Внимание: почасовые данные для прогноза не получены.[/yellow]")
 
     if raw_data:
         run_fuzzy_logic(raw_data, source_name=f"API: ({latitude}, {longitude})")
     else:
-        console.log("[bold red]Нет 'сырых' данных для 'матана'.[/]")
+        console.log("[bold red]Нет данных для запуска системы логики.[/]")
 
 
 def run_mock_mode():
-    """
-    (Этап 5 - "Хардтест") Запускаем режим генерации.
-    Читает "жопу" из 'mock_data.json'.
-    """
-    console.log("[bold yellow]Режим 'Тестовый' (Mock)[/]")
+    """Запускает тестовый режим с использованием данных из `mock_data.json`."""
+    console.log("\n[bold yellow]Запуск в тестовом режиме (из mock_data.json)[/]")
     MOCK_FILE = "mock_data.json"
     
     try:
         with open(MOCK_FILE, 'r', encoding='utf-8') as f:
             mock_scenarios = json.load(f)
         
-        console.print("Доступные 'хардтест' сценарии из [cyan]mock_data.json[/cyan]:")
-        
+        console.print("Доступные тестовые сценарии из [cyan]mock_data.json[/cyan]:")
         scenario_keys = list(mock_scenarios.keys())
         prompt_text = "\n"
         choices = []
         for i, key in enumerate(scenario_keys):
-            comment = mock_scenarios[key].get('comment', 'N/A')
+            comment = mock_scenarios[key].get('comment', 'Нет описания')
             prompt_text += f"  [{i+1}] {key} ([grey50]{comment}[/grey50])\n"
             choices.append(str(i+1))
         
-        prompt_text += "\n  [q] Назад в Главное Меню\n\n  Ваш выбор:"
+        prompt_text += "\n  [q] Назад в Главное Меню\n\n  Выберите сценарий:"
         choices.append("q")
-
         choice = Prompt.ask(prompt_text, choices=choices, default="1")
         
-        if choice == 'q':
-            return
+        if choice == 'q': return
             
         selected_key = scenario_keys[int(choice)-1]
-        console.log(f"Загружаем сценарий: [bold yellow]{selected_key}[/]")
-        
-        mock_raw_data = mock_scenarios[selected_key]
-        
-        run_fuzzy_logic(mock_raw_data, source_name=f"Mock: {selected_key}")
+        console.log(f"Загрузка сценария: [bold yellow]{selected_key}[/]")
+        run_fuzzy_logic(mock_scenarios[selected_key], source_name=f"Mock: {selected_key}")
 
     except FileNotFoundError:
         console.log(f"[bold red]Критическая Ошибка: Файл '{MOCK_FILE}' не найден![/]")
-        console.log("Пожалуйста, создайте 'mock_data.json' в корневой папке.")
-    except Exception as e:
-        console.log("[bold red]Критическая Ошибка в 'Тестовом режиме':[/]")
+    except Exception:
+        console.log("[bold red]Критическая Ошибка в тестовом режиме:[/]")
         console.print_exception()
 
 
 def main():
-    """
-    (Этап 0) Главный цикл программы.
-    """
+    """Главная функция, запускающая основной цикл программы."""
     print_autograph()
     
     while True:
@@ -418,25 +372,22 @@ def main():
             title="[cyan]Главное Меню[/]",
             padding=(1, 2)
         ))
-        
         mode = Prompt.ask(
-            "  [1] 'Живой' режим (Парсинг API по координатам)\n"
-            "  [2] 'Тестовый' режим (Генерация данных)\n"
+            "  [1] 'Живой' режим (данные из API по координатам)\n"
+            "  [2] 'Тестовый' режим (данные из файла)\n"
             "  [q] Выход\n"
             "\n  Ваш выбор:",
-            choices=["1", "2", "q"],
-            default="1"
+            choices=["1", "2", "q"], default="1"
         )
         
-        if mode == '1':
-            run_live_mode()
-        elif mode == '2':
-            run_mock_mode()
+        if mode == '1': run_live_mode()
+        elif mode == '2': run_mock_mode()
         elif mode == 'q':
-            console.log("[bold yellow]Выход. Спим довольные.[/]")
+            console.log("[bold yellow]Завершение работы программы.[/]")
             break
         
-        console.print("\n" + "="*80 + "\n") # Разделитель
+        Prompt.ask("\n[bold]Нажмите Enter, чтобы вернуться в Главное Меню...[/]")
+        console.print("\n" + "="*80 + "\n")
 
 if __name__ == "__main__":
     main()
